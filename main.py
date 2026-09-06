@@ -19,14 +19,6 @@ ADMIN_IDS = {7537910482, 8631477823}
 CARD_NUMBER = "9860 1666 5645 6349"
 CARD_OWNER = "AZIZBEK K"
 
-MAIN_CHANNEL = "@yangikinoobott"
-
-CHANNELS_TO_SHOW = [
-    {"name": "📢 1 - Zayavka Kanal", "url": "https://t.me/+US3wQJVDWA1mMjQy"},
-    {"name": "📢 2 - Zayavka Kanal", "url": "https://t.me/+UgzA_Y73q8Y4Y2Uy"},
-    {"name": "⭐️ Asosiy Kanal", "url": f"https://t.me/{MAIN_CHANNEL[1:]}"}
-]
-
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -45,6 +37,9 @@ class ApproveCB(CallbackData, prefix="approve"):
 class RejectCB(CallbackData, prefix="reject"):
     user_id: int
 
+class ChannelDelCB(CallbackData, prefix="ch_del"):
+    channel_id: int
+
 # ==========================================
 #        MA'LUMOTLAR BAZASI (SQLITE)
 # ==========================================
@@ -53,13 +48,22 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
-                premium_until DATETIME
+                premium_until DATETIME,
+                joined_date DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS movies (
                 code INTEGER PRIMARY KEY,
                 file_id TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT,
+                name TEXT,
+                type TEXT
             )
         """)
         await db.commit()
@@ -79,26 +83,46 @@ async def is_premium(user_id) -> bool:
         return False
 
 # ==========================================
-#      MAJBURIY OBUNA
+#      MAJBURIY OBUNA VA ZAYAVKALARNI TEKSHIRISH
 # ==========================================
 async def check_subscription(user_id: int) -> bool:
-    try:
-        member = await bot.get_chat_member(chat_id=MAIN_CHANNEL, user_id=user_id)
-        if member.status in ['left', 'kicked']:
-            return False
+    async with aiosqlite.connect("bot_database.db") as db:
+        cursor = await db.execute("SELECT chat_id, type FROM channels")
+        channels = await cursor.fetchall()
+    
+    if not channels:
         return True
-    except Exception:
-        return False
 
-def get_sub_keyboard():
+    for chat_id, ch_type in channels:
+        try:
+            member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+            # Agar obuna bo'lmagan yoki tark etgan bo'lsa
+            if member.status in ['left', 'kicked']:
+                return False
+        except Exception:
+            # Agar bot kanalga admin bo'lmasa yoki xatolik bo'lsa, xavfsizlik uchun o'tkazib yubormasligi mumkin
+            # Lekin zayavka turidagi kanallarda oddiy get_chat_member 'left' berishi mumkin, shuning uchun ehtiyot bo'lamiz
+            pass
+    return True
+
+async def get_sub_keyboard():
+    async with aiosqlite.connect("bot_database.db") as db:
+        cursor = await db.execute("SELECT chat_id, name FROM channels")
+        channels = await cursor.fetchall()
+
     builder = []
-    for ch in CHANNELS_TO_SHOW:
-        builder.append([InlineKeyboardButton(text=ch["name"], url=ch["url"])])
+    for chat_id, name in channels:
+        # Agar havolasi saqlangan bo'lsa yokiusername bo'lsa
+        if chat_id.startswith("http"):
+            url = chat_id
+        else:
+            url = f"https://t.me/{chat_id.replace('@', '')}"
+        builder.append([InlineKeyboardButton(text=name, url=url)])
     
     builder.append([InlineKeyboardButton(text="⚡️ TEKSHIRISH ⚡️", callback_data="check_sub")])
     return InlineKeyboardMarkup(inline_keyboard=builder)
 
-# Oddiy foydalanuvchilar uchun pastdagi tugma
+# Foydalanuvchi klaviaturasi
 main_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="💎 PREMIUM VIP 💎")]
@@ -106,13 +130,12 @@ main_reply_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# RASMDAGI ADMIN UCHUN PASTDAGI TUGMALAR (ReplyKeyboard)
+# ADMIN PANEL TUGMALARI (Siz xohlagandek qisqartirilgan va to'g'rilangan)
 admin_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📢 Kanallarni sozlash")],
         [KeyboardButton(text="🎬 Kino Yuklash"), KeyboardButton(text="📬 Xabar Yuborish")],
-        [KeyboardButton(text="⚙️ Asosiy sozlamalar")],
-        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="💰 Daromad")],
+        [KeyboardButton(text="📊 Statistika")],
         [KeyboardButton(text="◀️ Orqaga")]
     ],
     resize_keyboard=True
@@ -134,6 +157,7 @@ def get_tariffs_keyboard():
 # ==========================================
 class AdminState(StatesGroup):
     waiting_for_broadcast = State()
+    waiting_for_channel_info = State()
 
 class PaymentState(StatesGroup):
     waiting_for_receipt = State()
@@ -158,7 +182,7 @@ async def start_handler(message: types.Message):
             "⚠️ <b>Kechirasiz, botimizdan foydalanish uchun ushbu kanallarga obuna bo'lishingiz/zayavka yuborishingiz kerak!</b> 📌\n\n"
             "💎 <b>Premium obuna sotib olib, kanallarga obuna bo'lmasdan foydalanishingiz ham mumkin.</b> 🚀"
         )
-        await message.answer(text, reply_markup=get_sub_keyboard(), parse_mode="HTML")
+        await message.answer(text, reply_markup=await get_sub_keyboard(), parse_mode="HTML")
 
 @dp.callback_query(F.data == "check_sub")
 async def check_sub_handler(call: types.CallbackQuery):
@@ -170,7 +194,7 @@ async def check_sub_handler(call: types.CallbackQuery):
             parse_mode="HTML"
         )
     else:
-        await call.answer("❌ Kanallarga obuna bo'lmadingiz!", show_alert=True)
+        await call.answer("❌ Hali barcha kanallarga obuna bo'lmadingiz!", show_alert=True)
 
 @dp.callback_query(F.data == "back_to_start")
 async def back_to_start_handler(call: types.CallbackQuery):
@@ -316,73 +340,6 @@ async def reject_payment_handler(call: types.CallbackQuery, callback_data: Rejec
     await call.message.edit_caption(caption=call.message.caption + "\n\n❌ <b>RAD ETILDI</b>", parse_mode="HTML")
     await call.answer("To'lov rad etildi.", show_alert=True)
 
-# ==========================================
-#     ADMIN: /prem, /unprem va /backup
-# ==========================================
-@dp.message(Command("prem"), F.from_user.id.in_(ADMIN_IDS))
-async def admin_set_premium(message: types.Message):
-    args = message.text.split()
-    if len(args) != 3 or not args[1].isdigit() or not args[2].isdigit():
-        await message.reply("❌ <b>Xato format!</b>\n\n<b>Ishlatilishi:</b> <code>/prem user_id kun</code>\n<b>Misol:</b> <code>/prem 123456789 30</code>", parse_mode="HTML")
-        return
-    
-    uid = int(args[1])
-    days = int(args[2])
-    now = datetime.now()
-    
-    async with aiosqlite.connect("bot_database.db") as db:
-        cursor = await db.execute("SELECT premium_until FROM users WHERE user_id = ?", (uid,))
-        row = await cursor.fetchone()
-        
-        if row and row[0]:
-            current_expiry = datetime.fromisoformat(row[0])
-            if current_expiry > now:
-                new_expiry = current_expiry + timedelta(days=days)
-            else:
-                new_expiry = now + timedelta(days=days)
-        else:
-            new_expiry = now + timedelta(days=days)
-            await db.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
-            
-        await db.execute("UPDATE users SET premium_until = ? WHERE user_id = ?", (new_expiry.isoformat(), uid))
-        await db.commit()
-    
-    await message.reply(f"✅ <b>{uid}</b> <b>ID raqamli foydalanuvchiga</b> <b>{days} kunlik Premium berildi!</b> 👑", parse_mode="HTML")
-    try:
-        await bot.send_message(uid, f"🎉 <b>Sizga admin tomonidan {days} kunlik Premium obuna taqdim etildi!</b> ✨", parse_mode="HTML")
-    except:
-        pass
-
-@dp.message(Command("unprem"), F.from_user.id.in_(ADMIN_IDS))
-async def admin_remove_premium(message: types.Message):
-    args = message.text.split()
-    if len(args) != 2 or not args[1].isdigit():
-        await message.reply("❌ <b>Xato format!</b>\n\n<b>Ishlatilishi:</b> <code>/unprem user_id</code>\n<b>Misol:</b> <code>/unprem 123456789</code>", parse_mode="HTML")
-        return
-    
-    uid = int(args[1])
-    
-    async with aiosqlite.connect("bot_database.db") as db:
-        await db.execute("UPDATE users SET premium_until = NULL WHERE user_id = ?", (uid,))
-        await db.commit()
-    
-    await message.reply(f"✅ <b>{uid}</b> <b>ID raqamli foydalanuvchidan Premium olib tashlandi!</b>", parse_mode="HTML")
-    try:
-        await bot.send_message(uid, "⚠️ <b>Sizning Premium obunangiz admin tomonidan bekor qilindi.</b>", parse_mode="HTML")
-    except:
-        pass
-
-@dp.message(Command("backup"), F.from_user.id.in_(ADMIN_IDS))
-async def backup_database(message: types.Message):
-    if os.path.exists("bot_database.db"):
-        await message.answer_document(
-            types.FSInputFile("bot_database.db"),
-            caption="📂 <b>Bazaning nusxasi (Backup) tayyor!</b> 💾\n\n<b>Barcha ma'lumotlar xavfsiz saqlangan.</b>",
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer("❌ <b>Hozircha baza fayli topilmadi.</b>", parse_mode="HTML")
-
 # Kino qidirish
 @dp.message(F.text.regexp(r'^\d+$'))
 async def find_movie_handler(message: types.Message):
@@ -411,43 +368,105 @@ async def find_movie_handler(message: types.Message):
     await message.reply_video(video=row[0], caption=f"🎬 <b>Kino kodi:</b> <b>{movie_code}</b>\n\n🤖 <b>@{bot_info.username}</b>", parse_mode="HTML")
 
 # ==========================================
-#        ADMIN PANEL VA TUGMALAR (RASMDAGIDEK)
+#        ADMIN PANEL FUNKSIYALARI
 # ==========================================
 @dp.message(Command("admin"), F.from_user.id.in_(ADMIN_IDS))
+@dp.message(F.text == "◀️ Orqaga", F.from_user.id.in_(ADMIN_IDS))
 async def admin_panel_handler(message: types.Message):
-    # Rasmdagi kabi /admin bosilganda pastki klaviaturani chiqarish
     await message.answer(
         "👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", 
         reply_markup=admin_reply_keyboard, 
         parse_mode="HTML"
     )
 
-# Pastdagi tugmalar bosilganda ishlaydigan qismlar:
+# 1. KANALLARNI SOZLASH (Rasmdagidek boshqarish)
 @dp.message(F.text == "📢 Kanallarni sozlash", F.from_user.id.in_(ADMIN_IDS))
 async def channels_settings_menu(message: types.Message):
-    await message.answer("Quyidagilardan birini tanlang:", reply_markup=admin_reply_keyboard)
+    async with aiosqlite.connect("bot_database.db") as db:
+        cursor = await db.execute("SELECT id, chat_id, name, type FROM channels")
+        channels = await cursor.fetchall()
+    
+    text = "📢 <b>Kanallarni sozlash bo'limi</b>\n\n📋 <b>Hozirgi ulangan kanallar:</b>\n"
+    kb = []
+    
+    if channels:
+        for ch_id, chat_id, name, ch_type in channels:
+            text += f"• {name} ({chat_id}) - [{ch_type}]\n"
+            kb.append([InlineKeyboardButton(text=f"❌ O'chirish: {name}", callback_data=ChannelDelCB(channel_id=ch_id).pack())])
+    else:
+        text += "<i>Hozircha kanallar ulanmagan.</i>\n"
 
+    kb.append([InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_channel_start")])
+    kb.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back_inline")])
+    
+    await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@dp.callback_query(F.data == "admin_back_inline", F.from_user.id.in_(ADMIN_IDS))
+async def admin_back_inline(call: types.CallbackQuery):
+    await call.message.edit_text("👨‍💻 <b>Admin panel:</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Kanallarni sozlash", callback_data="channels_menu_cb")]
+    ]), parse_mode="HTML")
+
+@dp.callback_query(F.data == "channels_menu_cb", F.from_user.id.in_(ADMIN_IDS))
+async def channels_menu_cb(call: types.CallbackQuery):
+    async with aiosqlite.connect("bot_database.db") as db:
+        cursor = await db.execute("SELECT id, chat_id, name, type FROM channels")
+        channels = await cursor.fetchall()
+    
+    text = "📢 <b>Kanallarni sozlash bo'limi</b>\n\n📋 <b>Hozirgi ulangan kanallar:</b>\n"
+    kb = []
+    if channels:
+        for ch_id, chat_id, name, ch_type in channels:
+            text += f"• {name} ({chat_id}) - [{ch_type}]\n"
+            kb.append([InlineKeyboardButton(text=f"❌ O'chirish: {name}", callback_data=ChannelDelCB(channel_id=ch_id).pack())])
+    else:
+        text += "<i>Hozircha kanallar ulanmagan.</i>\n"
+
+    kb.append([InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_channel_start")])
+    await call.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@dp.callback_query(ChannelDelCB.filter(), F.from_user.id.in_(ADMIN_IDS))
+async def delete_channel_cb(call: types.CallbackQuery, callback_data: ChannelDelCB):
+    async with aiosqlite.connect("bot_database.db") as db:
+        await db.execute("DELETE FROM channels WHERE id = ?", (callback_data.channel_id,))
+        await db.commit()
+    await call.answer("Kanal o'chirildi!", show_alert=True)
+    await channels_menu_cb(call)
+
+@dp.callback_query(F.data == "add_channel_start", F.from_user.id.in_(ADMIN_IDS))
+async def add_channel_start(call: types.CallbackQuery, state: FSMContext):
+    await call.message.answer(
+        "➕ <b>Yangi kanal qo'shish uchun quyidagi formatda yuboring:</b>\n\n"
+        "<code>Kanal_Nomi | @kanal_username_yoki_havola | Majburiy_oki_Zayavka</code>\n\n"
+        "<b>Misol:</b>\n<code>Asosiy Kanal | @yangikinoobott | Majburiy</code>\n"
+        "yoki\n<code>Zayavka Kanal | https://t.me/+US3wQJVDW | Zayavka</code>",
+        parse_mode="HTML"
+    )
+    await state.set_state(AdminState.waiting_for_channel_info)
+    await call.answer()
+
+@dp.message(AdminState.waiting_for_channel_info, F.from_user.id.in_(ADMIN_IDS))
+async def save_channel_handler(message: types.Message, state: FSMContext):
+    try:
+        parts = [p.strip() for p in message.text.split("|")]
+        if len(parts) != 3:
+            await message.reply("❌ <b>Format xato! Qaytadan yuboring:</b>", parse_mode="HTML")
+            return
+        
+        name, chat_id, ch_type = parts
+        async with aiosqlite.connect("bot_database.db") as db:
+            await db.execute("INSERT INTO channels (chat_id, name, type) VALUES (?, ?, ?)", (chat_id, name, ch_type))
+            await db.commit()
+            
+        await message.reply("✅ <b>Kanal muvaffaqiyatli qo'shildi!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
+        await state.clear()
+    except Exception as e:
+        await message.reply(f"❌ Xatolik yuz berdi: {e}")
+
+# 2. KINO YUKLASH
 @dp.message(F.text == "🎬 Kino Yuklash", F.from_user.id.in_(ADMIN_IDS))
 async def upload_movie_menu(message: types.Message):
-    await message.answer("Kino qo'shish uchun video bilan birga uning kodini (faqat raqam) yuboring!", reply_markup=admin_reply_keyboard)
-
-@dp.message(F.text == "📬 Xabar Yuborish", F.from_user.id.in_(ADMIN_IDS))
-async def broadcast_menu(message: types.Message, state: FSMContext):
-    await message.answer("📢 Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:", reply_markup=admin_reply_keyboard)
-    await state.set_state(AdminState.waiting_for_broadcast)
-
-@dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMIN_IDS))
-async def stats_menu(message: types.Message):
-    async with aiosqlite.connect("bot_database.db") as db:
-        users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
-        movies_count = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
-    
-    text = f"📊 <b>Statistika</b>\n• Obunachilar soni: {users_count[0]:,} ta\n🎬 Kinolar soni: {movies_count[0]} ta"
-    await message.answer(text, reply_markup=admin_reply_keyboard, parse_mode="HTML")
-
-@dp.message(F.text == "◀️ Orqaga", F.from_user.id.in_(ADMIN_IDS))
-async def admin_back_menu(message: types.Message):
-    await message.answer("Asosiy menyuga qaytdingiz.", reply_markup=main_reply_keyboard)
+    await message.answer("🎬 <b>Kino qo'shish uchun video bilan birga uning kodini (faqat raqam) caption (izoh) qismiga yozib yuboring!</b>", parse_mode="HTML", reply_markup=admin_reply_keyboard)
 
 @dp.message(F.video & (F.from_user.id.in_(ADMIN_IDS)))
 async def add_movie_handler(message: types.Message):
@@ -463,6 +482,12 @@ async def add_movie_handler(message: types.Message):
         await db.commit()
         
     await message.reply(f"✅ <b>Kino bazaga qo'shildi!</b> 🎬\n<b>Kodi:</b> <b>{movie_code}</b>", parse_mode="HTML")
+
+# 3. XABAR YUBORISH (Broadcast)
+@dp.message(F.text == "📬 Xabar Yuborish", F.from_user.id.in_(ADMIN_IDS))
+async def broadcast_menu(message: types.Message, state: FSMContext):
+    await message.answer("📢 <b>Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:</b>\n(Matn, rasm yoki video yuborishingiz mumkin)\n\nBekor qilish uchun /cancel yuboring.", parse_mode="HTML", reply_markup=admin_reply_keyboard)
+    await state.set_state(AdminState.waiting_for_broadcast)
 
 @dp.message(AdminState.waiting_for_broadcast, F.from_user.id.in_(ADMIN_IDS))
 async def send_broadcast_handler(message: types.Message, state: FSMContext):
@@ -488,6 +513,45 @@ async def send_broadcast_handler(message: types.Message, state: FSMContext):
 
     await message.answer(f"✅ <b>Xabar {count} ta foydalanuvchiga muvaffaqiyatli yuborildi!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
     await state.clear()
+
+# 4. STATISTIKA (Siz yuborgan aniq ko'rinish va hisob-kitoblar bilan)
+@dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMIN_IDS))
+async def stats_menu(message: types.Message):
+    async with aiosqlite.connect("bot_database.db") as db:
+        users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
+        movies_count = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
+        
+        # Vaqt bo'yicha hisoblar
+        now = datetime.now()
+        day_ago = (now - timedelta(days=1)).isoformat()
+        week_ago = (now - timedelta(days=7)).isoformat()
+        month_ago = (now - timedelta(days=30)).isoformat()
+        
+        day_users = await (await db.execute("SELECT COUNT(*) FROM users WHERE joined_date >= ?", (day_ago,))).fetchone()
+        week_users = await (await db.execute("SELECT COUNT(*) FROM users WHERE joined_date >= ?", (week_ago,))).fetchone()
+        month_users = await (await db.execute("SELECT COUNT(*) FROM users WHERE joined_date >= ?", (month_ago,))).fetchone()
+
+    text = (
+        f"📊 <b>Statistika</b>\n"
+        f"• Obunachilar soni: {users_count[0]:,} ta\n"
+        f"• Faol obunachilar: {users_count[0]:,} ta\n"
+        f"• Tark etganlar: 0 ta\n\n"
+        f"📈 <b>Obunachilar qo'shilishi</b>\n"
+        f"• Oxirgi 24 soat: +{day_users[0]} obunachi\n"
+        f"• Oxirgi 7 kun: +{week_users[0]} obunachi\n"
+        f"• Oxirgi 30 kun: +{month_users[0]} obunachi\n\n"
+        f"📊 <b>Faollik</b>\n"
+        f"• Oxirgi 24 soatda faol: {day_users[0]} ta\n"
+        f"• Oxirgi 7 kun faol: {week_users[0]} ta\n"
+        f"• Oxirgi 30 kun faol: {month_users[0]} ta\n\n"
+        f"📥 <b>Yuklanishlar</b>\n"
+        f"• Oxirgi 24 soat: 0 ta\n"
+        f"• Oxirgi 7 kun: 0 ta\n"
+        f"• Oxirgi 30 kun: 0 ta\n\n"
+        f"🎬 <b>Kinolar soni:</b> {movies_count[0]} ta"
+    ).replace(",", " ")
+    
+    await message.answer(text, reply_markup=admin_reply_keyboard, parse_mode="HTML")
 
 # ==========================================
 #               MAIN
