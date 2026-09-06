@@ -15,15 +15,12 @@ from aiogram.fsm.context import FSMContext
 #               SOZLAMALAR
 # ==========================================
 BOT_TOKEN = "8626387450:AAEcwHBWlfYDhJ3eIL43DqMJBDU0xeo8irc"
-# Bir nechta admin ID larni tekshirish uchun list yoki set ishlatamiz:
 ADMIN_IDS = {7537910482, 8631477823}
 CARD_NUMBER = "9860 1666 5645 6349"
 CARD_OWNER = "AZIZBEK K"
 
-# FAQAT SHU KANAL TEKSHIRILADI:
 MAIN_CHANNEL = "@yangikinoobott"
 
-# TUGMADA KO'RINADIGAN ZAYAVKA KANALLAR:
 CHANNELS_TO_SHOW = [
     {"name": "📢 1 - Zayavka Kanal", "url": "https://t.me/+US3wQJVDWA1mMjQy"},
     {"name": "📢 2 - Zayavka Kanal", "url": "https://t.me/+UgzA_Y73q8Y4Y2Uy"},
@@ -101,9 +98,22 @@ def get_sub_keyboard():
     builder.append([InlineKeyboardButton(text="⚡️ TEKSHIRISH ⚡️", callback_data="check_sub")])
     return InlineKeyboardMarkup(inline_keyboard=builder)
 
+# Oddiy foydalanuvchilar uchun pastdagi tugma
 main_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="💎 PREMIUM VIP 💎")]
+    ],
+    resize_keyboard=True
+)
+
+# RASMDAGI ADMIN UCHUN PASTDAGI TUGMALAR (ReplyKeyboard)
+admin_reply_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📢 Kanallarni sozlash")],
+        [KeyboardButton(text="🎬 Kino Yuklash"), KeyboardButton(text="📬 Xabar Yuborish")],
+        [KeyboardButton(text="⚙️ Asosiy sozlamalar")],
+        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="💰 Daromad")],
+        [KeyboardButton(text="◀️ Orqaga")]
     ],
     resize_keyboard=True
 )
@@ -247,7 +257,6 @@ async def receipt_received_handler(message: types.Message, state: FSMContext):
         f"💰 <b>Summa:</b> <b>{price:,} so'm</b>"
     )
     
-    # Barcha adminlarga chekni yuborish
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_photo(chat_id=admin_id, photo=photo_file_id, caption=caption, reply_markup=admin_kb, parse_mode="HTML")
@@ -374,14 +383,6 @@ async def backup_database(message: types.Message):
     else:
         await message.answer("❌ <b>Hozircha baza fayli topilmadi.</b>", parse_mode="HTML")
 
-@dp.message(F.document & (F.from_user.id.in_(ADMIN_IDS)))
-async def restore_database(message: types.Message):
-    if message.document.file_name.endswith(".db"):
-        file_id = message.document.file_id
-        file = await bot.get_file(file_id)
-        await bot.download(file, destination="bot_database.db")
-        await message.reply("✅ <b>Baza muvaffaqiyatli tiklandi!</b> 💾", parse_mode="HTML")
-
 # Kino qidirish
 @dp.message(F.text.regexp(r'^\d+$'))
 async def find_movie_handler(message: types.Message):
@@ -410,8 +411,44 @@ async def find_movie_handler(message: types.Message):
     await message.reply_video(video=row[0], caption=f"🎬 <b>Kino kodi:</b> <b>{movie_code}</b>\n\n🤖 <b>@{bot_info.username}</b>", parse_mode="HTML")
 
 # ==========================================
-#               ADMIN PANEL
+#        ADMIN PANEL VA TUGMALAR (RASMDAGIDEK)
 # ==========================================
+@dp.message(Command("admin"), F.from_user.id.in_(ADMIN_IDS))
+async def admin_panel_handler(message: types.Message):
+    # Rasmdagi kabi /admin bosilganda pastki klaviaturani chiqarish
+    await message.answer(
+        "👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", 
+        reply_markup=admin_reply_keyboard, 
+        parse_mode="HTML"
+    )
+
+# Pastdagi tugmalar bosilganda ishlaydigan qismlar:
+@dp.message(F.text == "📢 Kanallarni sozlash", F.from_user.id.in_(ADMIN_IDS))
+async def channels_settings_menu(message: types.Message):
+    await message.answer("Quyidagilardan birini tanlang:", reply_markup=admin_reply_keyboard)
+
+@dp.message(F.text == "🎬 Kino Yuklash", F.from_user.id.in_(ADMIN_IDS))
+async def upload_movie_menu(message: types.Message):
+    await message.answer("Kino qo'shish uchun video bilan birga uning kodini (faqat raqam) yuboring!", reply_markup=admin_reply_keyboard)
+
+@dp.message(F.text == "📬 Xabar Yuborish", F.from_user.id.in_(ADMIN_IDS))
+async def broadcast_menu(message: types.Message, state: FSMContext):
+    await message.answer("📢 Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:", reply_markup=admin_reply_keyboard)
+    await state.set_state(AdminState.waiting_for_broadcast)
+
+@dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMIN_IDS))
+async def stats_menu(message: types.Message):
+    async with aiosqlite.connect("bot_database.db") as db:
+        users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
+        movies_count = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
+    
+    text = f"📊 <b>Statistika</b>\n• Obunachilar soni: {users_count[0]:,} ta\n🎬 Kinolar soni: {movies_count[0]} ta"
+    await message.answer(text, reply_markup=admin_reply_keyboard, parse_mode="HTML")
+
+@dp.message(F.text == "◀️ Orqaga", F.from_user.id.in_(ADMIN_IDS))
+async def admin_back_menu(message: types.Message):
+    await message.answer("Asosiy menyuga qaytdingiz.", reply_markup=main_reply_keyboard)
+
 @dp.message(F.video & (F.from_user.id.in_(ADMIN_IDS)))
 async def add_movie_handler(message: types.Message):
     if not message.caption or not message.caption.isdigit():
@@ -427,65 +464,10 @@ async def add_movie_handler(message: types.Message):
         
     await message.reply(f"✅ <b>Kino bazaga qo'shildi!</b> 🎬\n<b>Kodi:</b> <b>{movie_code}</b>", parse_mode="HTML")
 
-@dp.message(Command("admin"), F.from_user.id.in_(ADMIN_IDS))
-async def admin_panel_handler(message: types.Message):
-    btn = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Xabar tarqatish", callback_data="admin_broadcast")]
-    ])
-    await message.answer("👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", reply_markup=btn, parse_mode="HTML")
-
-@dp.callback_query(F.data == "admin_stats", F.from_user.id.in_(ADMIN_IDS))
-async def admin_stats_handler(call: types.CallbackQuery):
-    async with aiosqlite.connect("bot_database.db") as db:
-        users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
-        movies_count = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
-    
-    text = (
-        "📊 <b>Statistika</b>\n"
-        f"• Obunachilar soni: {users_count[0]:,} ta\n"
-        "• Faol obunachilar: 0 ta\n"
-        "• Tark etganlar: 0 ta\n\n"
-        "📈 <b>Obunachilar qo'shilishi</b>\n"
-        "• Oxirgi 24 soat: +0 obunachi\n"
-        "• Oxirgi 7 kun: +0 obunachi\n"
-        "• Oxirgi 30 kun: +0 obunachi\n\n"
-        "📊 <b>Faollik</b>\n"
-        "• Oxirgi 24 soatda faol: 0 ta\n"
-        "• Oxirgi 7 kun faol: 0 ta\n"
-        "• Oxirgi 30 kun faol: 0 ta\n\n"
-        "📥 <b>Yuklanishlar</b>\n"
-        "• Oxirgi 24 soat: 0 ta\n"
-        "• Oxirgi 7 kun: 0 ta\n"
-        "• Oxirgi 30 kun: 0 ta\n\n"
-        f"🎬 <b>Kinolar soni:</b> {movies_count[0]} ta"
-    ).replace(",", " ")
-    
-    back_btn = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]])
-    await call.message.edit_text(text, reply_markup=back_btn, parse_mode="HTML")
-
-@dp.callback_query(F.data == "admin_back", F.from_user.id.in_(ADMIN_IDS))
-async def admin_back_handler(call: types.CallbackQuery):
-    btn = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Xabar tarqatish", callback_data="admin_broadcast")]
-    ])
-    await call.message.edit_text("👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", reply_markup=btn, parse_mode="HTML")
-
-@dp.callback_query(F.data == "admin_broadcast", F.from_user.id.in_(ADMIN_IDS))
-async def admin_broadcast_handler(call: types.CallbackQuery, state: FSMContext):
-    await call.message.answer(
-        "📢 <b>Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:</b>\n"
-        "<i>(Matn, rasm yoki video yuborishingiz mumkin)</i>\n\n"
-        "<b>Bekor qilish uchun /cancel buyrug'ini yuboring.</b>", 
-        parse_mode="HTML"
-    )
-    await state.set_state(AdminState.waiting_for_broadcast)
-
 @dp.message(AdminState.waiting_for_broadcast, F.from_user.id.in_(ADMIN_IDS))
 async def send_broadcast_handler(message: types.Message, state: FSMContext):
     if message.text == '/cancel':
-        await message.answer("❌ <b>Xabar tarqatish bekor qilindi.</b>", parse_mode="HTML")
+        await message.answer("❌ <b>Xabar tarqatish bekor qilindi.</b>", parse_mode="HTML", reply_markup=admin_reply_keyboard)
         await state.clear()
         return
 
@@ -504,7 +486,7 @@ async def send_broadcast_handler(message: types.Message, state: FSMContext):
         except Exception:
             pass
 
-    await message.answer(f"✅ <b>Xabar {count} ta foydalanuvchiga muvaffaqiyatli yuborildi!</b> 🎉", parse_mode="HTML")
+    await message.answer(f"✅ <b>Xabar {count} ta foydalanuvchiga muvaffaqiyatli yuborildi!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
     await state.clear()
 
 # ==========================================
@@ -515,11 +497,8 @@ async def handle_ping(request):
 
 async def main():
     await init_db()
-    
-    # Eski webhooklarni va navbatda turgan xabarlarni tozalaymiz
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Render ajratgan PORT ni olish va HTTP server yaratish
     port = int(os.environ.get("PORT", 8080))
     app = web.Application()
     app.router.add_get("/", handle_ping)
@@ -528,7 +507,6 @@ async def main():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    # aiogram polling ni boshlash
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
