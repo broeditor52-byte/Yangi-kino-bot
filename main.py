@@ -15,14 +15,15 @@ from aiogram.fsm.context import FSMContext
 #               SOZLAMALAR
 # ==========================================
 BOT_TOKEN = "8626387450:AAEcwHBWlfYDhJ3eIL43DqMJBDU0xeo8irc"
-ADMIN_ID = 7537910482 , 8631477823
+# Bir nechta admin ID larni tekshirish uchun list yoki set ishlatamiz:
+ADMIN_IDS = {7537910482, 8631477823}
 CARD_NUMBER = "9860 1666 5645 6349"
 CARD_OWNER = "AZIZBEK K"
 
 # FAQAT SHU KANAL TEKSHIRILADI:
 MAIN_CHANNEL = "@yangikinoobott"
 
-# TUGMADA KO'RINADIGAN ZAYAVKA KANALLAR (Bot bularni TEKSHIRMAYDI, shunchaki tugma):
+# TUGMADA KO'RINADIGAN ZAYAVKA KANALLAR:
 CHANNELS_TO_SHOW = [
     {"name": "📢 1 - Zayavka Kanal", "url": "https://t.me/+US3wQJVDWA1mMjQy"},
     {"name": "📢 2 - Zayavka Kanal", "url": "https://t.me/+UgzA_Y73q8Y4Y2Uy"},
@@ -81,7 +82,7 @@ async def is_premium(user_id) -> bool:
         return False
 
 # ==========================================
-#      MAJBURIY OBUNA (FAQAT @azizakabott)
+#      MAJBURIY OBUNA
 # ==========================================
 async def check_subscription(user_id: int) -> bool:
     try:
@@ -198,7 +199,8 @@ async def premium_menu_handler(call: types.CallbackQuery):
         await call.message.edit_text(text, reply_markup=get_tariffs_keyboard(), parse_mode="HTML")
     except:
         await call.message.answer(text, reply_markup=get_tariffs_keyboard(), parse_mode="HTML")
-      @dp.callback_query(TariffCB.filter())
+
+@dp.callback_query(TariffCB.filter())
 async def tariff_selected_handler(call: types.CallbackQuery, callback_data: TariffCB, state: FSMContext):
     await state.update_data(days=callback_data.days, price=callback_data.price)
     
@@ -245,11 +247,17 @@ async def receipt_received_handler(message: types.Message, state: FSMContext):
         f"💰 <b>Summa:</b> <b>{price:,} so'm</b>"
     )
     
-    await bot.send_photo(chat_id=ADMIN_ID, photo=photo_file_id, caption=caption, reply_markup=admin_kb, parse_mode="HTML")
+    # Barcha adminlarga chekni yuborish
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_photo(chat_id=admin_id, photo=photo_file_id, caption=caption, reply_markup=admin_kb, parse_mode="HTML")
+        except Exception:
+            pass
+
     await message.answer("✅ <b>Chekingiz adminga yuborildi!</b> ⏳\n<b>Adminlar tekshirib chiqquncha kuting.</b>", parse_mode="HTML", reply_markup=main_reply_keyboard)
     await state.clear()
 
-@dp.callback_query(ApproveCB.filter(), F.from_user.id == ADMIN_ID)
+@dp.callback_query(ApproveCB.filter(), F.from_user.id.in_(ADMIN_IDS))
 async def approve_payment_handler(call: types.CallbackQuery, callback_data: ApproveCB):
     user_id = callback_data.user_id
     days = callback_data.days
@@ -283,7 +291,7 @@ async def approve_payment_handler(call: types.CallbackQuery, callback_data: Appr
     await call.message.edit_caption(caption=call.message.caption + "\n\n✅ <b>TASDIQLANDI</b>", parse_mode="HTML")
     await call.answer("To'lov tasdiqlandi!", show_alert=True)
 
-@dp.callback_query(RejectCB.filter(), F.from_user.id == ADMIN_ID)
+@dp.callback_query(RejectCB.filter(), F.from_user.id.in_(ADMIN_IDS))
 async def reject_payment_handler(call: types.CallbackQuery, callback_data: RejectCB):
     user_id = callback_data.user_id
     
@@ -302,7 +310,7 @@ async def reject_payment_handler(call: types.CallbackQuery, callback_data: Rejec
 # ==========================================
 #     ADMIN: /prem, /unprem va /backup
 # ==========================================
-@dp.message(Command("prem"), F.from_user.id == ADMIN_ID)
+@dp.message(Command("prem"), F.from_user.id.in_(ADMIN_IDS))
 async def admin_set_premium(message: types.Message):
     args = message.text.split()
     if len(args) != 3 or not args[1].isdigit() or not args[2].isdigit():
@@ -336,7 +344,7 @@ async def admin_set_premium(message: types.Message):
     except:
         pass
 
-@dp.message(Command("unprem"), F.from_user.id == ADMIN_ID)
+@dp.message(Command("unprem"), F.from_user.id.in_(ADMIN_IDS))
 async def admin_remove_premium(message: types.Message):
     args = message.text.split()
     if len(args) != 2 or not args[1].isdigit():
@@ -355,7 +363,7 @@ async def admin_remove_premium(message: types.Message):
     except:
         pass
 
-@dp.message(Command("backup"), F.from_user.id == ADMIN_ID)
+@dp.message(Command("backup"), F.from_user.id.in_(ADMIN_IDS))
 async def backup_database(message: types.Message):
     if os.path.exists("bot_database.db"):
         await message.answer_document(
@@ -366,14 +374,15 @@ async def backup_database(message: types.Message):
     else:
         await message.answer("❌ <b>Hozircha baza fayli topilmadi.</b>", parse_mode="HTML")
 
-@dp.message(F.document & (F.from_user.id == ADMIN_ID))
+@dp.message(F.document & (F.from_user.id.in_(ADMIN_IDS)))
 async def restore_database(message: types.Message):
     if message.document.file_name.endswith(".db"):
         file_id = message.document.file_id
         file = await bot.get_file(file_id)
         await bot.download(file, destination="bot_database.db")
         await message.reply("✅ <b>Baza muvaffaqiyatli tiklandi!</b> 💾", parse_mode="HTML")
-      # Kino qidirish
+
+# Kino qidirish
 @dp.message(F.text.regexp(r'^\d+$'))
 async def find_movie_handler(message: types.Message):
     movie_code = int(message.text)
@@ -386,10 +395,10 @@ async def find_movie_handler(message: types.Message):
         await message.reply("❌ <b>Kino kodini noto'g'ri yubordingiz!</b> ⚠️", parse_mode="HTML")
         return
 
-    if not await is_premium(message.from_user.id) and message.from_user.id != ADMIN_ID:
+    if not await is_premium(message.from_user.id) and message.from_user.id not in ADMIN_IDS:
         text = (
             "🔒 <b>Ushbu kino faqat «Premium» foydalanuvchilar uchun!</b> 👑\n\n"
-            "❗️ <b>Premium obunaga ega bo'ling.</b> 🚀"
+            "❗ <b>Premium obunaga ega bo'ling.</b> 🚀"
         )
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💎 PREMIUM OLISH 💎", callback_data="premium_menu")]
@@ -403,7 +412,7 @@ async def find_movie_handler(message: types.Message):
 # ==========================================
 #               ADMIN PANEL
 # ==========================================
-@dp.message(F.video & (F.from_user.id == ADMIN_ID))
+@dp.message(F.video & (F.from_user.id.in_(ADMIN_IDS)))
 async def add_movie_handler(message: types.Message):
     if not message.caption or not message.caption.isdigit():
         await message.reply("❌ <b>Kino qo'shish uchun video bilan birga uning kodini (faqat raqam) yozib yuboring!</b>", parse_mode="HTML")
@@ -418,7 +427,7 @@ async def add_movie_handler(message: types.Message):
         
     await message.reply(f"✅ <b>Kino bazaga qo'shildi!</b> 🎬\n<b>Kodi:</b> <b>{movie_code}</b>", parse_mode="HTML")
 
-@dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
+@dp.message(Command("admin"), F.from_user.id.in_(ADMIN_IDS))
 async def admin_panel_handler(message: types.Message):
     btn = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
@@ -426,7 +435,7 @@ async def admin_panel_handler(message: types.Message):
     ])
     await message.answer("👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", reply_markup=btn, parse_mode="HTML")
 
-@dp.callback_query(F.data == "admin_stats", F.from_user.id == ADMIN_ID)
+@dp.callback_query(F.data == "admin_stats", F.from_user.id.in_(ADMIN_IDS))
 async def admin_stats_handler(call: types.CallbackQuery):
     async with aiosqlite.connect("bot_database.db") as db:
         users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
@@ -455,7 +464,7 @@ async def admin_stats_handler(call: types.CallbackQuery):
     back_btn = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="◀️ Orqaga", callback_data="admin_back")]])
     await call.message.edit_text(text, reply_markup=back_btn, parse_mode="HTML")
 
-@dp.callback_query(F.data == "admin_back", F.from_user.id == ADMIN_ID)
+@dp.callback_query(F.data == "admin_back", F.from_user.id.in_(ADMIN_IDS))
 async def admin_back_handler(call: types.CallbackQuery):
     btn = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
@@ -463,7 +472,7 @@ async def admin_back_handler(call: types.CallbackQuery):
     ])
     await call.message.edit_text("👨‍💻 <b>Admin panelga xush kelibsiz!</b> ⚙️\n\n<b>Quyidagi menyudan kerakli bo'limni tanlang:</b>", reply_markup=btn, parse_mode="HTML")
 
-@dp.callback_query(F.data == "admin_broadcast", F.from_user.id == ADMIN_ID)
+@dp.callback_query(F.data == "admin_broadcast", F.from_user.id.in_(ADMIN_IDS))
 async def admin_broadcast_handler(call: types.CallbackQuery, state: FSMContext):
     await call.message.answer(
         "📢 <b>Barcha foydalanuvchilarga yuboriladigan xabarni yuboring:</b>\n"
@@ -473,7 +482,7 @@ async def admin_broadcast_handler(call: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(AdminState.waiting_for_broadcast)
 
-@dp.message(AdminState.waiting_for_broadcast, F.from_user.id == ADMIN_ID)
+@dp.message(AdminState.waiting_for_broadcast, F.from_user.id.in_(ADMIN_IDS))
 async def send_broadcast_handler(message: types.Message, state: FSMContext):
     if message.text == '/cancel':
         await message.answer("❌ <b>Xabar tarqatish bekor qilindi.</b>", parse_mode="HTML")
@@ -522,5 +531,5 @@ async def main():
     # aiogram polling ni boshlash
     await dp.start_polling(bot)
 
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(main())
