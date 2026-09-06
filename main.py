@@ -96,12 +96,9 @@ async def check_subscription(user_id: int) -> bool:
     for chat_id, ch_type in channels:
         try:
             member = await bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-            # Agar obuna bo'lmagan yoki tark etgan bo'lsa
             if member.status in ['left', 'kicked']:
                 return False
         except Exception:
-            # Agar bot kanalga admin bo'lmasa yoki xatolik bo'lsa, xavfsizlik uchun o'tkazib yubormasligi mumkin
-            # Lekin zayavka turidagi kanallarda oddiy get_chat_member 'left' berishi mumkin, shuning uchun ehtiyot bo'lamiz
             pass
     return True
 
@@ -112,7 +109,6 @@ async def get_sub_keyboard():
 
     builder = []
     for chat_id, name in channels:
-        # Agar havolasi saqlangan bo'lsa yokiusername bo'lsa
         if chat_id.startswith("http"):
             url = chat_id
         else:
@@ -130,7 +126,7 @@ main_reply_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# ADMIN PANEL TUGMALARI (Siz xohlagandek qisqartirilgan va to'g'rilangan)
+# ADMIN PANEL TUGMALARI
 admin_reply_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📢 Kanallarni sozlash")],
@@ -238,12 +234,13 @@ async def premium_menu_handler(call: types.CallbackQuery):
 async def tariff_selected_handler(call: types.CallbackQuery, callback_data: TariffCB, state: FSMContext):
     await state.update_data(days=callback_data.days, price=callback_data.price)
     
+    price_formatted = f"{callback_data.price:,}".replace(",", " ")
     text = (
         "💳 <b>PREMIUM OBUNA — TO'LOV MA'LUMOTLARI</b> 💸\n\n"
         f"📦 <b>Tarif:</b> <b>{callback_data.days} kunlik obuna</b>\n"
         f"💳 <b>Karta raqami:</b> <code>{CARD_NUMBER}</code>\n"
         f"👤 <b>Karta egasi:</b> <b>{CARD_OWNER}</b>\n"
-        f"💰 <b>To'lov summasi:</b> <b>{callback_data.price:,} so'm</b>\n\n"
+        f"💰 <b>To'lov summasi:</b> <b>{price_formatted} so'm</b>\n\n"
         "⚠️ <b>Diqqat:</b>\n"
         "📸 <b>Pulni o'tkazgandan so'ng, chekni (skrinshotni) yuborish uchun pastdagi tugmani bosing!</b> ⬇️"
     )
@@ -264,6 +261,7 @@ async def receipt_received_handler(message: types.Message, state: FSMContext):
     data = await state.get_data()
     days = data.get("days", 30)
     price = data.get("price", 0)
+    price_formatted = f"{price:,}".replace(",", " ")
     photo_file_id = message.photo[-1].file_id
     
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -278,7 +276,7 @@ async def receipt_received_handler(message: types.Message, state: FSMContext):
         f"👤 <b>Foydalanuvchi:</b> <b>{message.from_user.full_name}</b>\n"
         f"🆔 <b>ID:</b> <code>{message.from_user.id}</code>\n"
         f"📦 <b>Tarif:</b> <b>{days} kunlik</b>\n"
-        f"💰 <b>Summa:</b> <b>{price:,} so'm</b>"
+        f"💰 <b>Summa:</b> <b>{price_formatted} so'm</b>"
     )
     
     for admin_id in ADMIN_IDS:
@@ -379,7 +377,7 @@ async def admin_panel_handler(message: types.Message):
         parse_mode="HTML"
     )
 
-# 1. KANALLARNI SOZLASH (Rasmdagidek boshqarish)
+# 1. KANALLARNI SOZLASH
 @dp.message(F.text == "📢 Kanallarni sozlash", F.from_user.id.in_(ADMIN_IDS))
 async def channels_settings_menu(message: types.Message):
     async with aiosqlite.connect("bot_database.db") as db:
@@ -491,7 +489,7 @@ async def broadcast_menu(message: types.Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_broadcast, F.from_user.id.in_(ADMIN_IDS))
 async def send_broadcast_handler(message: types.Message, state: FSMContext):
-    if message.text == '/cancel':
+    if message.text and message.text.lower() == '/cancel':
         await message.answer("❌ <b>Xabar tarqatish bekor qilindi.</b>", parse_mode="HTML", reply_markup=admin_reply_keyboard)
         await state.clear()
         return
@@ -514,14 +512,16 @@ async def send_broadcast_handler(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Xabar {count} ta foydalanuvchiga muvaffaqiyatli yuborildi!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
     await state.clear()
 
-# 4. STATISTIKA (Siz yuborgan aniq ko'rinish va hisob-kitoblar bilan)
+# 4. STATISTIKA
 @dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMIN_IDS))
 async def stats_menu(message: types.Message):
     async with aiosqlite.connect("bot_database.db") as db:
-        users_count = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
-        movies_count = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
+        users_count_res = await (await db.execute("SELECT COUNT(*) FROM users")).fetchone()
+        movies_count_res = await (await db.execute("SELECT COUNT(*) FROM movies")).fetchone()
         
-        # Vaqt bo'yicha hisoblar
+        users_cnt = users_count_res[0] if users_count_res else 0
+        movies_cnt = movies_count_res[0] if movies_count_res else 0
+        
         now = datetime.now()
         day_ago = (now - timedelta(days=1)).isoformat()
         week_ago = (now - timedelta(days=7)).isoformat()
@@ -531,25 +531,29 @@ async def stats_menu(message: types.Message):
         week_users = await (await db.execute("SELECT COUNT(*) FROM users WHERE joined_date >= ?", (week_ago,))).fetchone()
         month_users = await (await db.execute("SELECT COUNT(*) FROM users WHERE joined_date >= ?", (month_ago,))).fetchone()
 
+        day_cnt = day_users[0] if day_users else 0
+        week_cnt = week_users[0] if week_users else 0
+        month_cnt = month_users[0] if month_users else 0
+
     text = (
-        f"📊 <b>Statistika</b>\n"
-        f"• Obunachilar soni: {users_count[0]:,} ta\n"
-        f"• Faol obunachilar: {users_count[0]:,} ta\n"
+        "📊 <b>Statistika</b>\n"
+        f"• Obunachilar soni: {users_cnt} ta\n"
+        f"• Faol obunachilar: {users_cnt} ta\n"
         f"• Tark etganlar: 0 ta\n\n"
-        f"📈 <b>Obunachilar qo'shilishi</b>\n"
-        f"• Oxirgi 24 soat: +{day_users[0]} obunachi\n"
-        f"• Oxirgi 7 kun: +{week_users[0]} obunachi\n"
-        f"• Oxirgi 30 kun: +{month_users[0]} obunachi\n\n"
-        f"📊 <b>Faollik</b>\n"
-        f"• Oxirgi 24 soatda faol: {day_users[0]} ta\n"
-        f"• Oxirgi 7 kun faol: {week_users[0]} ta\n"
-        f"• Oxirgi 30 kun faol: {month_users[0]} ta\n\n"
-        f"📥 <b>Yuklanishlar</b>\n"
-        f"• Oxirgi 24 soat: 0 ta\n"
-        f"• Oxirgi 7 kun: 0 ta\n"
-        f"• Oxirgi 30 kun: 0 ta\n\n"
-        f"🎬 <b>Kinolar soni:</b> {movies_count[0]} ta"
-    ).replace(",", " ")
+        "📈 <b>Obunachilar qo'shilishi</b>\n"
+        f"• Oxirgi 24 soat: +{day_cnt} obunachi\n"
+        f"• Oxirgi 7 kun: +{week_cnt} obunachi\n"
+        f"• Oxirgi 30 kun: +{month_cnt} obunachi\n\n"
+        "📊 <b>Faollik</b>\n"
+        f"• Oxirgi 24 soatda faol: {day_cnt} ta\n"
+        f"• Oxirgi 7 kun faol: {week_cnt} ta\n"
+        f"• Oxirgi 30 kun faol: {month_cnt} ta\n\n"
+        "📥 <b>Yuklanishlar</b>\n"
+        "• Oxirgi 24 soat: 0 ta\n"
+        "• Oxirgi 7 kun: 0 ta\n"
+        "• Oxirgi 30 kun: 0 ta\n\n"
+        f"🎬 <b>Kinolar soni:</b> {movies_cnt} ta"
+    )
     
     await message.answer(text, reply_markup=admin_reply_keyboard, parse_mode="HTML")
 
