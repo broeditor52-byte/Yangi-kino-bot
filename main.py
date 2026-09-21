@@ -15,9 +15,9 @@ from aiogram.fsm.context import FSMContext
 #                  SOZLAMALAR
 # ==========================================
 BOT_TOKEN = "8626387450:AAEcwHBWlfYDhJ3eIL43DqMJBDU0xeo8irc"
-ADMIN_IDS = {8479968636, 8631477823}
-CARD_NUMBER = "6262 5700 2049 7345"
-CARD_OWNER = "KIDIRBAEVA S"
+ADMIN_IDS = {7337910482, 8631477823}
+CARD_NUMBER = "9860 0301 5349 4296"
+CARD_OWNER = "Kengesbayev Muhammed"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -86,7 +86,7 @@ async def is_premium(user_id) -> bool:
         return False
 
 # ==========================================
-#      MAJBURIY OBUNA VA ZAYAVKALARNI TEKSHIRISH
+#      MAJBURIY OBUNA VA ZAYAVKALARni TEKSHIRISH
 # ==========================================
 async def check_subscription(user_id: int) -> bool:
     async with aiosqlite.connect("bot_database.db") as db:
@@ -470,7 +470,6 @@ async def restore_process_handler(message: types.Message, state: FSMContext):
         with open("bot_database.db", "wb") as new_db:
             new_db.write(downloaded_file.read())
 
-        # Restore qilingandan keyin jadvallar eski bo'lsa ham xatolik bermasligi uchun tuzilmani yangilab olamiz
         await init_db()
 
         await message.answer("✅ <b>Ma'lumotlar bazasi muvaffaqiyatli tiklandi (Restore qilindi)!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
@@ -479,10 +478,10 @@ async def restore_process_handler(message: types.Message, state: FSMContext):
         await message.reply(f"❌ Xatolik yuz berdi: {e}", reply_markup=admin_reply_keyboard)
         await state.clear()
 
-# 1. KANALLARNI SOZLASH (Xatoliklarga qarshi himoyalangan)
+# 1. KANALLARNI SOZLASH
 @dp.message(F.text == "📢 Kanallarni sozlash", F.from_user.id.in_(ADMIN_IDS))
 async def channels_settings_menu(message: types.Message):
-    await init_db()  # Jadval mavjudligini kafolatlash uchun
+    await init_db()
     async with aiosqlite.connect("bot_database.db") as db:
         async with db.execute("SELECT id, chat_id, name, type FROM channels") as cursor:
             channels = await cursor.fetchall()
@@ -606,7 +605,7 @@ async def send_broadcast_handler(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Xabar {count} ta foydalanuvchiga muvaffaqiyatli yuborildi!</b> 🎉", parse_mode="HTML", reply_markup=admin_reply_keyboard)
     await state.clear()
 
-# 4. STATISTIKA (Xatoliklarga qarshi tekshiruv bilan)
+# 4. STATISTIKA
 @dp.message(F.text == "📊 Statistika", F.from_user.id.in_(ADMIN_IDS))
 async def stats_menu(message: types.Message):
     await init_db()
@@ -652,7 +651,7 @@ async def stats_menu(message: types.Message):
     await message.answer(text, reply_markup=admin_reply_keyboard, parse_mode="HTML")
 
 # ==========================================
-#                MAIN
+#                  MAIN
 # ==========================================
 async def handle_ping(request):
     return web.Response(text="Bot ishlamoqda!")
