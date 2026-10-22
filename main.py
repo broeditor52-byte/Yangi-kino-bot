@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 # ==========================================
 #                  SOZLAMALAR
 # ==========================================
-BOT_TOKEN = "8626387450:AAEcwHBWlfYDhJ3eIL43DqMJBDU0xeo8irc"
+BOT_TOKEN = "8803803525:AAF3pTF53KLm8TaNJD11B0qteeKircFuLEA"
 ADMIN_IDS = {8664737277, 8631477823}
 CARD_NUMBER = "9860 0301 5349 4296"
 CARD_OWNER = "Kengesbayev Muhammed"
